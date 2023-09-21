@@ -7,7 +7,7 @@ import sounddevice as sd
 import soundfile as sf
 import time
 from pydub import AudioSegment
-
+from testaudio import testfuc
 # 설정 값
 THRESHOLD = 300  # 음성 감지 임계값
 
@@ -24,6 +24,8 @@ video_capture = cv2.VideoCapture(0)
 # 표정을 저장하기 위한 큐(queue) 초기화
 expression_queue = []
 queue_max_size = 6  # 초당 6번 값을 저장하도록 설정
+total_probabilities = [0.0] * len(expression_labels)
+expression_probabilities_list = [[] for _ in range(len(expression_labels))]
 
 q = queue.Queue()
 recorder = False
@@ -46,7 +48,7 @@ def complicated_record():
                 if recording:
                     file.write(chunk)
                     now = time.time()
-                    if (now - start_time) >= 8:
+                    if (now - start_time) >= 5:
                         print('stop recording')
                         break
 
@@ -92,8 +94,13 @@ while True:
 
         # 모델을 사용하여 감정 분석
         output = model.predict(face_roi)[0]
+        expression_probabilities = output.tolist()
         expression_index = np.argmax(output)
         expression_label = expression_labels[expression_index]
+                
+        for i, prob in enumerate(expression_probabilities):
+            total_probabilities[i] += prob
+            expression_probabilities_list[i].append(prob)
 
         # 표정 큐에 현재 표정 추가
         expression_queue.append(expression_label)
@@ -101,32 +108,31 @@ while True:
         # 큐의 크기를 초과하면 가장 오래된 표정 제거
         if len(expression_queue) > queue_max_size:
             expression_queue.pop(0)
+    
+        # 가장 빈번하게 나타나는 표정 찾기
+        most_frequent_expression = max(set(expression_queue), key=expression_queue.count)
 
-        # 프레임에 감정 표시
-        cv2.putText(frame, expression_label, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-
-    # 화면에 출력
+        # 6번 이상 표정을 저장하면 해당 표정을 반환
+        if expression_queue.count(most_frequent_expression) >= queue_max_size:
+            total_probabilities = [round(prob / sum(total_probabilities), 3) for prob in total_probabilities]
+            average_probabilities = [round(sum(probs) / len(probs), 3) if len(probs) > 0 else 0.0 for probs in expression_probabilities_list]
+            expression_queue = []  # 표정 큐 초기화
+            expression_probabilities_list = [[] for _ in range(len(expression_labels))]  # 감정별 확률 리스트 초기화
+        
     cv2.imshow('Expression Recognition', frame)
-
-    # 가장 빈번하게 나타나는 표정 찾기
-    most_frequent_expression = max(set(expression_queue), key=expression_queue.count)
-
-    # 6번 이상 표정을 저장하면 해당 표정을 반환
-    if expression_queue.count(most_frequent_expression) >= queue_max_size:
-        print("Most frequent expression:", most_frequent_expression)
-        expression_queue = []  # 표정 큐 초기화
-
-    # ESC 키로 종료
+        
+    now_break = time.time()
+    if (now_break - start_time) >= 6:
+        break 
     key = cv2.waitKey(25)
     if key == 27:
         break
+        
 
-# 비디오 캡처 해제 및 창 닫기
+# 오디오 녹음 중지, 비디오 캡처 중지 
+stop_audio()
 video_capture.release()
 cv2.destroyAllWindows()
-
-# 오디오 녹음 중지
-stop_audio()
 
 # # 음성 파일 불러오기
 song = AudioSegment.from_wav("data/output.wav")
@@ -134,3 +140,25 @@ song = AudioSegment.from_wav("data/output.wav")
 # 음성 파일 처리 및 저장
 louder_song = song + 30
 louder_song.export("data/output.wav", format='wav')
+
+audio_result = testfuc()
+result = []
+weight = 0.6 
+print(audio_result)
+average_probabilities = [average_probabilities[3], average_probabilities[1], average_probabilities[0], average_probabilities[2]]
+# Neutral Happy Angry Sad sort 
+print(average_probabilities)
+result = [a * weight + b * (1 - weight) for a, b in zip(average_probabilities, audio_result)]
+
+# 선택
+final_predictions = np.argmax(result, axis=1)
+print(f"Predicted Emotion: {final_predictions}")
+
+if final_predictions == 0:
+    print('n')
+elif final_predictions == 1:
+    print('h')
+elif final_predictions == 2:
+    print('a')
+else :
+    print('s')
